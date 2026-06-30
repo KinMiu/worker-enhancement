@@ -19,4 +19,4 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY . .
 
 # Jalankan script utama worker
-CMD ["python", "worker.py"]
+CMD ["python", "main.py"]
