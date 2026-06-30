@@ -25,6 +25,7 @@ def run_worker():
                 raw_bytes = message['data']
                 nparr = np.frombuffer(raw_bytes, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+                print(img)
 
                 if img is not None:
                     enhanced_img = enhance_image(img)
