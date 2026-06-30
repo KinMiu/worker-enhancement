@@ -50,7 +50,7 @@ def run_worker():
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
                 if img is not None:
-                    print(f"📸 Sukses decode frame! Ukuran: {img.shape}")
+                    # print(f"📸 Sukses decode frame! Ukuran: {img.shape}")
                     
                     # Eksekusi fungsi perbaikan kualitas gambar
                     enhanced_img = enhance_image(img)
