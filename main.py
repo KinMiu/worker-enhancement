@@ -8,22 +8,28 @@ r = redis.Redis(host='127.0.0.1', port=6380, db=0)
 
 def enhance_image(img):
     # 1. Denoising menggunakan Bilateral Filter
-    # Menghilangkan bintik/noise ruangan redup, tapi tetap menjaga garis wajah/objek agar tidak blur
-    denoised = cv2.bilateralFilter(img, d=7, sigmaColor=35, sigmaSpace=35)
+    denoised = cv2.bilateralFilter(img, d=7, sigmaColor=25, sigmaSpace=25)
     
-    # 2. Konversi BGR ke LAB untuk memisahkan kecerahan (L) dan warna (A, B)
-    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+    # 2. GAMMA CORRECTION (Menurunkan kecerahan yang overexposed)
+    # Nilai gamma > 1.0 akan menggelapkan gambar secara non-linear (menyelamatkan area silau)
+    gamma = 1.5 
+    invGamma = 1.0 / gamma
+    table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
+    gamma_corrected = cv2.LUT(denoised, table)
+    
+    # 3. Konversi ke LAB Color Space
+    lab = cv2.cvtColor(gamma_corrected, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     
-    # 3. Terapkan CLAHE pada layer kecerahan (L)
-    # clipLimit disesuaikan ke 2.0 agar kontras naik tapi tidak memicu noise baru
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    # 4. Terapkan CLAHE yang lebih lembut (Gentle CLAHE)
+    # clipLimit diturunkan dari 2.0 ke 1.2 agar area wajah tidak terlalu putih/silau
+    clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
     cl = clahe.apply(l)
     
-    # 4. Satukan kembali layer LAB
+    # 5. Satukan kembali layer LAB
     merged = cv2.merge((cl, a, b))
     
-    # 5. Kembalikan format ke BGR OpenCV
+    # 6. Kembalikan format ke BGR OpenCV
     result = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
     
     return result
