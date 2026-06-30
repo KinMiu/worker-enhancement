@@ -7,7 +7,6 @@ WORKDIR /app
 # (Sebagai antisipasi jika headless tetap membutuhkan beberapa shared library dasar)
 RUN apt-get update && apt-get install -y --no-install-recommends \
   libglib2.0-0 \
-  libgl1-mesa-glx \
   && rm -rf /var/lib/apt/lists/*
 
 # Copy file requirements terlebih dahulu (manfaatkan Docker layer caching)
