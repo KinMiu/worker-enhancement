@@ -17,7 +17,7 @@ def enhance_image(img):
 def run_worker():
     pubsub = r.pubsub()
     pubsub.subscribe('urken:frame:raw')
-    print(f"🚀 Worker started on {REDIS_HOST}. Waiting for frames...")
+    print(f"🚀 Worker started on local. Waiting for frames...")
 
     for message in pubsub.listen():
         if message['type'] == 'message':
