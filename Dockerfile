@@ -1,22 +1,23 @@
-# Gunakan base image yang ringan
 FROM python:3.10-slim
 
-# Install dependencies sistem yang dibutuhkan OpenCV
-# libgl1 untuk fungsi dasar, libglib2.0-0 untuk dependensi runtime
-RUN apt-get update && apt-get install -y \
-  libgl1 \
-  libglib2.0-0 \
-  && rm -rf /var/lib/apt/lists/*
-
-# Set working directory
+# Set working directory di dalam container
 WORKDIR /app
 
-# Copy requirements terlebih dahulu agar proses build lebih cepat (caching)
+# Install dependensi OS yang dibutuhkan oleh OpenCV jika menggunakan standard image
+# (Sebagai antisipasi jika headless tetap membutuhkan beberapa shared library dasar)
+RUN apt-get update && apt-get install -y --no-install-recommends \
+  libglib2.0-0 \
+  libgl1-mesa-glx \
+  && rm -rf /var/lib/apt/lists/*
+
+# Copy file requirements terlebih dahulu (manfaatkan Docker layer caching)
 COPY requirements.txt .
+
+# Install python dependencies
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Copy sisa kode program
+# Copy seluruh source code worker ke dalam container
 COPY . .
 
-# Jalankan worker
-CMD ["python", "main.py"]
+# Jalankan script utama worker
+CMD ["python", "worker.py"]

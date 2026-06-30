@@ -1,3 +1,4 @@
 redis
 opencv-python-headless
 numpy
+requests
