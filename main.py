@@ -4,8 +4,8 @@ import numpy as np
 import os
 
 # Gunakan env variable untuk host, default ke 'redis' (nama service docker)
-REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
-r = redis.Redis(host=REDIS_HOST, port=6380, db=0)
+# REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
+r = redis.Redis(host='127.0.0.1', port=6380, db=0)
 def enhance_image(img):
     lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
