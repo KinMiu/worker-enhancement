@@ -1,0 +1,3 @@
+redis
+opencv-python-headless
+numpy
