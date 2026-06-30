@@ -59,7 +59,7 @@ def detect_motion(current_frame):
     global prev_gray
     motion_detected = False
 
-    # 1. Convert ke Grayscale & Blur tebal untuk meminimalkan noise kabut/semut dari IR
+    # 1. Convert ke Grayscale & Blur tebal untuk meminimalkan false alarm dari bintik noise low-light
     gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (21, 21), 0)
 
@@ -83,33 +83,34 @@ def detect_motion(current_frame):
     prev_gray = gray
     return motion_detected
 
-def fix_ir_washout(img):
-    """Fungsi khusus menjinakkan silau/kabut putih ekstrem dari kamera mode Infrared"""
-    # 1. Denoising menggunakan Bilateral Filter untuk meredam noise kabut
-    denoised = cv2.bilateralFilter(img, d=9, sigmaColor=35, sigmaSpace=35)
+def enhance_image(img):
+    """Fungsi khusus mengoptimalkan kondisi ruangan gelap gulita / low-light tanpa Infrared"""
+    # 1. PEREKAYASAAN LOW-LIGHT (Denoising tingkat lanjut untuk memotong noise grain/semut)
+    # Kita pakai h=10 untuk meredam grain/bintik-bintik di area pekat
+    denoised = cv2.fastNlMeansDenoisingColored(img, None, h=10, hColor=10, templateWindowSize=7, searchWindowSize=21)
     
-    # 2. Gamma Correction Tinggi (2.8) untuk memotong paparan cahaya putih yang berlebih
-    gamma = 2.8  
+    # 2. LOW-LIGHT GAMMA CORRECTION (gamma < 1.0 untuk mendongkrak kegelapan secara non-linear)
+    gamma = 0.5 
     invGamma = 1.0 / gamma
     table = np.array([((i / 255.0) ** invGamma) * 255 for i in np.arange(0, 256)]).astype("uint8")
-    gamma_corrected = cv2.LUT(denoised, table)
+    gamma_boosted = cv2.LUT(denoised, table)
     
-    # 3. Konversi ke LAB Color Space
-    lab = cv2.cvtColor(gamma_corrected, cv2.COLOR_BGR2LAB)
+    # 3. Konversi ke LAB Color Space untuk optimasi kontras lokal
+    lab = cv2.cvtColor(gamma_boosted, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     
-    # 4. Normalisasi Linear penuh (Min-Max) untuk memetakan ulang rentang kontras yang hilang
-    l_normalized = cv2.normalize(l, None, alpha=0, beta=255, norm_type=cv2.NORM_MINMAX)
+    # 4. Terapkan CLAHE adaptif dengan clipLimit sedang (1.5)
+    # Ini supaya sisa siluet objek (seperti bantal/helm) bisa dipertegas bentuknya
+    clahe = cv2.createCLAHE(clipLimit=1.5, tileGridSize=(8, 8))
+    cl = clahe.apply(l)
     
-    # 5. Satukan kembali layer LAB ke format BGR
-    merged = cv2.merge((l_normalized, a, b))
+    # 5. Satukan kembali layer LAB
+    merged = cv2.merge((cl, a, b))
+    
+    # 6. Kembalikan format ke BGR OpenCV
     result = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
     
-    # 6. Sharpening Filter untuk mempertegas bentuk objek/wajah yang tadinya blur ketutup kabut
-    kernel = np.array([[0, -1, 0], [-1, 5, -1], [0, -1, 0]])
-    sharpened = cv2.filter2D(result, -1, kernel)
-    
-    return sharpened
+    return result
 
 def run_worker():
     global last_telegram_time
@@ -132,11 +133,11 @@ def run_worker():
                     # A. DETEKSI GERAKAN (Gunakan frame asli bawaan kamera agar akurat)
                     is_moving = detect_motion(img)
                     
-                    # B. JINAKKAN KABUT IR & OPTIMASI GAMBAR
-                    enhanced_img = fix_ir_washout(img)
+                    # B. JALANKAN LOGIKA LOW-LIGHT ENHANCEMENT
+                    enhanced_img = enhance_image(img)
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     
-                    # Publish hasil olahan jernih ke Viewer Frontend lewat Redis channel
+                    # Publish hasil jernih ke Viewer Frontend lewat Redis channel
                     r.publish('urken:frame:enhanced', buffer.tobytes())
                     
                     # C. LOGIKA PENGIRIMAN ALERT KE TELEGRAM
@@ -149,8 +150,8 @@ def run_worker():
                             waktu_sekarang = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             caption = f"⚠️ *UrKen Alert!*\nTerdeteksi gerakan pada `{waktu_sekarang}`."
                             
-                            print(f"🚨 Motion Detected! Mengirim gambar hasil perbaikan ke Telegram...")
-                            # Kirim foto yang sudah dijinakkan kilaunya ke Telegram HP kamu
+                            print(f"🚨 Motion Detected! Mengirim gambar hasil optimasi low-light ke Telegram...")
+                            # Kirim foto yang sudah di-brighten ke Telegram HP kamu
                             send_telegram_alert(caption, buffer.tobytes())
                             
                 else:
