@@ -4,7 +4,7 @@ FROM python:3.10-slim
 # Install dependencies sistem yang dibutuhkan OpenCV
 # libgl1 untuk fungsi dasar, libglib2.0-0 untuk dependensi runtime
 RUN apt-get update && apt-get install -y \
-  libgl1-mesa-glx \
+  libgl1 \
   libglib2.0-0 \
   && rm -rf /var/lib/apt/lists/*
 
