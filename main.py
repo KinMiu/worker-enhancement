@@ -17,22 +17,38 @@ def enhance_image(img):
 def run_worker():
     pubsub = r.pubsub()
     pubsub.subscribe('urken:frame:raw')
-    print(f"🚀 Worker started on local. Waiting for frames...")
+    print(f"🚀 Worker started on {REDIS_HOST}. Waiting for frames...")
 
     for message in pubsub.listen():
         if message['type'] == 'message':
             try:
                 raw_bytes = message['data']
+                
+                # Pastikan data biner tidak kosong
+                if not raw_bytes:
+                    print("⚠️ Menerima payload kosong.")
+                    continue
+                
+                # Convert ke numpy array
                 nparr = np.frombuffer(raw_bytes, np.uint8)
+                
+                # Decode ke gambar OpenCV
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
-                print(img)
-
+                
                 if img is not None:
+                    print(f"📸 Sukses decode frame! Ukuran: {img.shape}")
+                    
+                    # Proses enhancement
                     enhanced_img = enhance_image(img)
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
+                    
+                    # Publish kembali ke Redis
                     r.publish('urken:frame:enhanced', buffer.tobytes())
+                else:
+                    print("❌ OpenCV Gagal men-decode biner menjadi gambar (img is None).")
+                    
             except Exception as e:
-                print(f"Error processing frame: {e}")
+                print(f"💥 Error saat memproses frame: {e}")
 
 if __name__ == "__main__":
     run_worker()
