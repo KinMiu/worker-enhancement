@@ -3,46 +3,62 @@ import cv2
 import numpy as np
 import os
 
-# Gunakan env variable untuk host, default ke 'redis' (nama service docker)
-# REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
+# HARDCODE: Langsung arahkan ke localhost dan port 6380 sesuai setup Golang kamu
 r = redis.Redis(host='127.0.0.1', port=6380, db=0)
+
 def enhance_image(img):
-    lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
+    # 1. Denoising menggunakan Bilateral Filter
+    # Menghilangkan bintik/noise ruangan redup, tapi tetap menjaga garis wajah/objek agar tidak blur
+    denoised = cv2.bilateralFilter(img, d=7, sigmaColor=35, sigmaSpace=35)
+    
+    # 2. Konversi BGR ke LAB untuk memisahkan kecerahan (L) dan warna (A, B)
+    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+    
+    # 3. Terapkan CLAHE pada layer kecerahan (L)
+    # clipLimit disesuaikan ke 2.0 agar kontras naik tapi tidak memicu noise baru
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
     cl = clahe.apply(l)
+    
+    # 4. Satukan kembali layer LAB
     merged = cv2.merge((cl, a, b))
-    return cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+    
+    # 5. Kembalikan format ke BGR OpenCV
+    result = cv2.cvtColor(merged, cv2.COLOR_LAB2BGR)
+    
+    return result
 
 def run_worker():
     pubsub = r.pubsub()
     pubsub.subscribe('urken:frame:raw')
-    print(f"🚀 Worker started on local. Waiting for frames...")
+    print("🚀 Worker started on 127.0.0.1:6380. Waiting for frames...")
 
     for message in pubsub.listen():
         if message['type'] == 'message':
             try:
                 raw_bytes = message['data']
                 
-                # Pastikan data biner tidak kosong
+                # Cek jika payload kosong
                 if not raw_bytes:
                     print("⚠️ Menerima payload kosong.")
                     continue
                 
-                # Convert ke numpy array
+                # Ubah biner dari Redis menjadi numpy array
                 nparr = np.frombuffer(raw_bytes, np.uint8)
                 
-                # Decode ke gambar OpenCV
+                # Decode numpy array menjadi gambar matriks OpenCV
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
                 if img is not None:
                     print(f"📸 Sukses decode frame! Ukuran: {img.shape}")
                     
-                    # Proses enhancement
+                    # Eksekusi fungsi perbaikan kualitas gambar
                     enhanced_img = enhance_image(img)
+                    
+                    # Encode kembali ke JPEG dengan kualitas 70% untuk dikirim ke Viewer
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 70])
                     
-                    # Publish kembali ke Redis
+                    # Kirim hasil olahan ke channel urken:frame:enhanced
                     r.publish('urken:frame:enhanced', buffer.tobytes())
                 else:
                     print("❌ OpenCV Gagal men-decode biner menjadi gambar (img is None).")
