@@ -90,15 +90,18 @@ def detect_motion(current_frame):
 
 def optimize_bright_mode(img):
     """Fungsi super ringan untuk memperjelas & mempertajam kondisi ruangan terang"""
-    # 1. Gunakan Unsharp Masking untuk menaikkan ketajaman (Sharpening) detail wajah/benda
-    gaussian_3 = cv2.GaussianBlur(img, (0, 0), 2.0)
+    # FIX 1: Berikan ukuran kernel ganjil yang eksplisit (9, 9) alih-alih (0, 0)
+    # Ini menjamin ukuran matriks hasil blur selalu sama presisi dengan img asli
+    gaussian_3 = cv2.GaussianBlur(img, (9, 9), 2.0)
+    
+    # Operasi matriks aman karena ukuran kedua array dijamin match
     sharpened = cv2.addWeighted(img, 1.5, gaussian_3, -0.5, 0)
     
     # 2. Konversi ke LAB untuk menaikkan kontras lokal secara instan & ringan
     lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     
-    # Clip limit kecil (1.2) agar warna tidak pecah/lebay, proses super cepat
+    # Clip limit kecil (1.2) agar warna tidak pecah
     clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
     cl = clahe.apply(l)
     
