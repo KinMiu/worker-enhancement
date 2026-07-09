@@ -105,15 +105,23 @@ def optimize_bright_mode(img):
 def run_worker():
     global last_telegram_time
     pubsub = r.pubsub()
-    pubsub.subscribe('urken:frame:raw')
+    
+    # FIX 1: Menggunakan psubscribe dengan wildcard (*) untuk menangkap semua MAC kamera
+    pubsub.psubscribe('urken:frame:raw:*')
     print(f"🚀 High-Speed Worker Started! Terhubung ke Redis.")
-    print(f"☀️ Mode Terang Aktif. Mengoptimalkan FPS Real-Time.")
+    print(f"☀️ Mode Terang Aktif. Mendengarkan seluruh stream dinamis (Pattern: urken:frame:raw:*)...")
 
     for message in pubsub.listen():
-        if message['type'] == 'message':
+        # FIX 2: Type check untuk psubscribe adalah 'pmessage'
+        if message['type'] == 'pmessage':
             try:
+                # Ambil nama channel asal untuk ekstraksi MAC Address
+                # Contoh channel: b'urken:frame:raw:A4F00F74EC20'
+                channel_name = message['channel'].decode('utf-8')
+                mac_address = channel_name.split(':')[-1]
+                
                 raw_bytes = message['data']
-                if not raw_bytes:
+                if not raw_bytes or len(raw_bytes) < 100:  # Validasi basic ukuran payload gambar
                     continue
                 
                 nparr = np.frombuffer(raw_bytes, np.uint8)
@@ -123,14 +131,15 @@ def run_worker():
                     # A. DETEKSI GERAKAN (Real-time tracking)
                     is_moving = detect_motion(img)
                     
-                    # B. OPTIMASI GAMBAR MODE TERANG (Super cepat, tanpa bottleneck)
+                    # B. OPTIMASI GAMBAR MODE TERANG
                     enhanced_img = optimize_bright_mode(img)
                     
-                    # Encode kualitas ditingkatkan ke 80 karena prosesnya sudah sangat enteng
+                    # Encode kualitas ditingkatkan ke 80
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     
-                    # Broadcast langsung ke Frontend viewer
-                    r.publish('urken:frame:enhanced', buffer.tobytes())
+                    # FIX 3: Publish balik ke channel enhanced spesifik menggunakan MAC Address tujuan
+                    enhanced_channel = f"urken:frame:enhanced:{mac_address}"
+                    r.publish(enhanced_channel, buffer.tobytes())
                     
                     # C. TELEGRAM NOTIFICATION
                     if is_moving:
@@ -139,13 +148,13 @@ def run_worker():
                             last_telegram_time = current_time
                             
                             waktu_sekarang = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                            caption = f"⚠️ *UrKen Alert!*\nTerdeteksi gerakan pada `{waktu_sekarang}`."
+                            caption = f"⚠️ *UrKen Alert!*\nTerdeteksi gerakan pada kamera `{mac_address}` pada `{waktu_sekarang}`."
                             
-                            print(f"🚨 Motion Detected! Mengirim snapshot bening ke Telegram...")
+                            print(f"🚨 Motion Detected pada {mac_address}! Mengirim snapshot ke Telegram...")
                             send_telegram_alert(caption, buffer.tobytes())
                             
                 else:
-                    print("❌ OpenCV Gagal men-decode biner.")
+                    print(f"❌ OpenCV Gagal men-decode biner dari Kamera: {mac_address}. Payload size: {len(raw_bytes)} bytes")
                     
             except Exception as e:
                 print(f"💥 Error pada pemrosesan frame: {e}")
