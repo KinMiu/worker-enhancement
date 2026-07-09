@@ -25,10 +25,15 @@ COOLDOWN_TELEGRAM = 60        # Jeda waktu 1 menit antar notifikasi Telegram
 prev_gray = None
 last_telegram_time = 0
 
+def log_with_time(message):
+    """Fungsi pembantu untuk mencetak log dengan detail timestamp waktu saat ini"""
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
+    print(f"[{now}] {message}", flush=True)
+
 def _send_telegram_worker(message, image_bytes):
     """Fungsi internal di background thread untuk kirim alert Telegram"""
     if not TELEGRAM_TOKEN or not TELEGRAM_CHAT_ID:
-        print("❌ Kredensial Telegram tidak ditemukan di environment variable!")
+        log_with_time("❌ Kredensial Telegram tidak ditemukan di environment variable!")
         return
 
     try:
@@ -43,11 +48,11 @@ def _send_telegram_worker(message, image_bytes):
             response = requests.post(url, data=data, timeout=10)
             
         if response.status_code == 200:
-            print("🚀 Notifikasi Telegram berhasil dikirim!")
+            log_with_time("🚀 Notifikasi Telegram berhasil dikirim!")
         else:
-            print(f"⚠️ Gagal kirim Telegram: {response.text}")
+            log_with_time(f"⚠️ Gagal kirim Telegram: {response.text}")
     except Exception as e:
-        print(f"💥 Error Telegram API: {e}")
+        log_with_time(f"💥 Error Telegram API: {e}")
 
 def send_telegram_alert(message, image_bytes=None):
     """Membungkus pengiriman Telegram ke dalam Thread agar tidak mengganggu aliran stream utama"""
@@ -106,38 +111,37 @@ def run_worker():
     global last_telegram_time
     pubsub = r.pubsub()
     
-    # FIX 1: Menggunakan psubscribe dengan wildcard (*) untuk menangkap semua MAC kamera
+    # Menggunakan psubscribe dengan wildcard (*) untuk menangkap semua MAC kamera
     pubsub.psubscribe('urken:frame:raw:*')
-    print(f"🚀 High-Speed Worker Started! Terhubung ke Redis.")
-    print(f"☀️ Mode Terang Aktif. Mendengarkan seluruh stream dinamis (Pattern: urken:frame:raw:*)...")
+    log_with_time("🚀 High-Speed Worker Started! Terhubung ke Redis.")
+    log_with_time("☀️ Mode Terang Aktif. Mendengarkan seluruh stream dinamis (Pattern: urken:frame:raw:*)...")
 
     for message in pubsub.listen():
-        # FIX 2: Type check untuk psubscribe adalah 'pmessage'
         if message['type'] == 'pmessage':
             try:
                 # Ambil nama channel asal untuk ekstraksi MAC Address
-                # Contoh channel: b'urken:frame:raw:A4F00F74EC20'
                 channel_name = message['channel'].decode('utf-8')
                 mac_address = channel_name.split(':')[-1]
                 
                 raw_bytes = message['data']
-                if not raw_bytes or len(raw_bytes) < 100:  # Validasi basic ukuran payload gambar
+                if not raw_bytes or len(raw_bytes) < 100:
+                    log_with_time(f"⚠️ Data kosong atau terlalu kecil diterima dari {mac_address}")
                     continue
                 
                 nparr = np.frombuffer(raw_bytes, np.uint8)
                 img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
                 
                 if img is not None:
-                    # A. DETEKSI GERAKAN (Real-time tracking)
+                    # A. DETEKSI GERAKAN
                     is_moving = detect_motion(img)
                     
                     # B. OPTIMASI GAMBAR MODE TERANG
                     enhanced_img = optimize_bright_mode(img)
                     
-                    # Encode kualitas ditingkatkan ke 80
+                    # Encode kualitas ke 80
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     
-                    # FIX 3: Publish balik ke channel enhanced spesifik menggunakan MAC Address tujuan
+                    # Publish balik ke channel enhanced spesifik memakai MAC Address tujuan
                     enhanced_channel = f"urken:frame:enhanced:{mac_address}"
                     r.publish(enhanced_channel, buffer.tobytes())
                     
@@ -150,14 +154,14 @@ def run_worker():
                             waktu_sekarang = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
                             caption = f"⚠️ *UrKen Alert!*\nTerdeteksi gerakan pada kamera `{mac_address}` pada `{waktu_sekarang}`."
                             
-                            print(f"🚨 Motion Detected pada {mac_address}! Mengirim snapshot ke Telegram...")
+                            log_with_time(f"🚨 Motion Detected pada {mac_address}! Mengirim snapshot ke Telegram...")
                             send_telegram_alert(caption, buffer.tobytes())
                             
                 else:
-                    print(f"❌ OpenCV Gagal men-decode biner dari Kamera: {mac_address}. Payload size: {len(raw_bytes)} bytes")
+                    log_with_time(f"❌ OpenCV Gagal men-decode biner dari Kamera: {mac_address}. Payload size: {len(raw_bytes)} bytes")
                     
             except Exception as e:
-                print(f"💥 Error pada pemrosesan frame: {e}")
+                log_with_time(f"💥 Error pada pemrosesan frame: {e}")
 
 if __name__ == "__main__":
     run_worker()
