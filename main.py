@@ -16,9 +16,9 @@ TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
 # Inisialisasi Redis client
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
 
-# Motion Detection Config
-THRESHOLD_SENSITIVITY = 20    # Diturunkan sedikit agar lebih sensitif di kondisi terang
-MIN_CONTOUR_AREA = 1000       # Ditingkatkan ke 1000 biar tidak gampang false alarm karena bayangan kecil
+# Motion Detection Config (Dioptimalkan untuk resolusi QVGA 320x240)
+THRESHOLD_SENSITIVITY = 20    
+MIN_CONTOUR_AREA = 500        # Sweet spot untuk QVGA agar objek tidak terlalu besar/kecil
 COOLDOWN_TELEGRAM = 60        # Jeda waktu 1 menit antar notifikasi Telegram
 
 # Variable Global untuk menyimpan state tracking gerakan
@@ -26,7 +26,7 @@ prev_gray = None
 last_telegram_time = 0
 
 def log_with_time(message):
-    """Fungsi pembantu untuk mencetak log dengan detail timestamp waktu saat ini"""
+    """Mencetak log dengan detail timestamp waktu saat ini secara instan ke Docker"""
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]
     print(f"[{now}] {message}", flush=True)
 
@@ -60,13 +60,18 @@ def send_telegram_alert(message, image_bytes=None):
     thr.start()
 
 def detect_motion(current_frame):
-    """Fungsi mendeteksi gerakan menggunakan Frame Differencing"""
+    """Fungsi mendeteksi gerakan menggunakan Frame Differencing (Safe from resolution change)"""
     global prev_gray
     motion_detected = False
 
     # 1. Convert ke Grayscale & Blur ringan (Sangat cepat)
     gray = cv2.cvtColor(current_frame, cv2.COLOR_BGR2GRAY)
     gray = cv2.GaussianBlur(gray, (15, 15), 0)
+
+    # FIX 1: Reset cache otomatis langsung di dalam jika dimensi frame sebelumnya dan sekarang tidak match
+    if prev_gray is not None and prev_gray.shape != gray.shape:
+        log_with_time(f"🔄 Ukuran frame berubah dari {prev_gray.shape} ke {gray.shape}. Mereset tracker gerakan...")
+        prev_gray = None
 
     if prev_gray is None:
         prev_gray = gray
@@ -90,18 +95,21 @@ def detect_motion(current_frame):
 
 def optimize_bright_mode(img):
     """Fungsi super ringan untuk memperjelas & mempertajam kondisi ruangan terang"""
-    # FIX 1: Berikan ukuran kernel ganjil yang eksplisit (9, 9) alih-alih (0, 0)
-    # Ini menjamin ukuran matriks hasil blur selalu sama presisi dengan img asli
+    # 1. Gunakan Unsharp Masking untuk menaikkan ketajaman detail
     gaussian_3 = cv2.GaussianBlur(img, (9, 9), 2.0)
     
-    # Operasi matriks aman karena ukuran kedua array dijamin match
-    sharpened = cv2.addWeighted(img, 1.5, gaussian_3, -0.5, 0)
+    # FIX 2: Defensive check untuk memastikan ukuran matriks blur dan asli sama persis
+    if img.shape != gaussian_3.shape:
+        log_with_time("⚠️ Mismatch dimensi pada optimasi gambar, melewati proses sharpening.")
+        sharpened = img.copy()
+    else:
+        sharpened = cv2.addWeighted(img, 1.5, gaussian_3, -0.5, 0)
     
     # 2. Konversi ke LAB untuk menaikkan kontras lokal secara instan & ringan
     lab = cv2.cvtColor(sharpened, cv2.COLOR_BGR2LAB)
     l, a, b = cv2.split(lab)
     
-    # Clip limit kecil (1.2) agar warna tidak pecah
+    # Clip limit kecil (1.2) agar warna tidak pecah/lebay, proses super cepat
     clahe = cv2.createCLAHE(clipLimit=1.2, tileGridSize=(8, 8))
     cl = clahe.apply(l)
     
@@ -114,12 +122,13 @@ def run_worker():
     global last_telegram_time
     pubsub = r.pubsub()
     
-    # Menggunakan psubscribe dengan wildcard (*) untuk menangkap semua MAC kamera
+    # Menggunakan psubscribe dengan wildcard (*) untuk menangkap semua MAC kamera secara dinamis
     pubsub.psubscribe('urken:frame:raw:*')
     log_with_time("🚀 High-Speed Worker Started! Terhubung ke Redis.")
     log_with_time("☀️ Mode Terang Aktif. Mendengarkan seluruh stream dinamis (Pattern: urken:frame:raw:*)...")
 
     for message in pubsub.listen():
+        # Type check untuk psubscribe adalah 'pmessage'
         if message['type'] == 'pmessage':
             try:
                 # Ambil nama channel asal untuk ekstraksi MAC Address
@@ -127,8 +136,7 @@ def run_worker():
                 mac_address = channel_name.split(':')[-1]
                 
                 raw_bytes = message['data']
-                if not raw_bytes or len(raw_bytes) < 100:
-                    log_with_time(f"⚠️ Data kosong atau terlalu kecil diterima dari {mac_address}")
+                if not raw_bytes or len(raw_bytes) < 100:  # Validasi payload gambar
                     continue
                 
                 nparr = np.frombuffer(raw_bytes, np.uint8)
@@ -141,10 +149,10 @@ def run_worker():
                     # B. OPTIMASI GAMBAR MODE TERANG
                     enhanced_img = optimize_bright_mode(img)
                     
-                    # Encode kualitas ke 80
+                    # Encode kualitas ditingkatkan ke 80
                     _, buffer = cv2.imencode('.jpg', enhanced_img, [int(cv2.IMWRITE_JPEG_QUALITY), 80])
                     
-                    # Publish balik ke channel enhanced spesifik memakai MAC Address tujuan
+                    # Publish balik ke channel enhanced spesifik menggunakan MAC Address tujuan
                     enhanced_channel = f"urken:frame:enhanced:{mac_address}"
                     r.publish(enhanced_channel, buffer.tobytes())
                     
