@@ -10,8 +10,8 @@ from datetime import datetime
 # --- CONFIGURATION (Membaca dari Environment Variables) ---
 REDIS_HOST = os.getenv('REDIS_HOST', '127.0.0.1')
 REDIS_PORT = int(os.getenv('REDIS_PORT', 6380))
-TELEGRAM_TOKEN = os.getenv('TELEGRAM_TOKEN')
-TELEGRAM_CHAT_ID = os.getenv('TELEGRAM_CHAT_ID')
+TELEGRAM_TOKEN = os.getenv('8145033027:AAEMeXMJx_QqFAiPfbG-j9XIhbqcStsTPf8')
+TELEGRAM_CHAT_ID = os.getenv('8275277499')
 
 # Inisialisasi Redis client
 r = redis.Redis(host=REDIS_HOST, port=REDIS_PORT, db=0)
